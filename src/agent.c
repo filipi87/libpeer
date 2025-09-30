@@ -151,12 +151,19 @@ static int agent_create_host_addr(Agent* agent) {
 static int agent_create_stun_addr(Agent* agent, Address* serv_addr) {
   int ret = -1;
   Address bind_addr;
+  Address local_addr;
   StunMessage send_msg;
   StunMessage recv_msg;
   memset(&send_msg, 0, sizeof(send_msg));
   memset(&recv_msg, 0, sizeof(recv_msg));
 
   stun_msg_create(&send_msg, STUN_CLASS_REQUEST | STUN_METHOD_BINDING);
+
+  // Determine which socket to use based on server address family
+  int socket_index = (serv_addr->family == AF_INET6) ? 1 : 0;
+
+  // Get the local address of the socket being used for the related address
+  memcpy(&local_addr, &agent->udp_sockets[socket_index].bind_addr, sizeof(Address));
 
   ret = agent_socket_send(agent, serv_addr, send_msg.buf, send_msg.size);
 
@@ -173,8 +180,15 @@ static int agent_create_stun_addr(Agent* agent, Address* serv_addr) {
 
   stun_parse_msg_buf(&recv_msg);
   memcpy(&bind_addr, &recv_msg.mapped_addr, sizeof(Address));
-  IceCandidate* ice_candidate = agent->local_candidates + agent->local_candidates_count++;
+  IceCandidate* ice_candidate = agent->local_candidates + agent->local_candidates_count;
+
+  // Create the SRFLX candidate with the mapped address from STUN response
   ice_candidate_create(ice_candidate, agent->local_candidates_count, ICE_CANDIDATE_TYPE_SRFLX, &bind_addr);
+
+  // Set the related address (raddr) to the local socket address that was used for STUN
+  memcpy(&ice_candidate->raddr, &local_addr, sizeof(Address));
+
+  agent->local_candidates_count++;
   return ret;
 }
 
@@ -182,10 +196,16 @@ static int agent_create_turn_addr(Agent* agent, Address* serv_addr, const char* 
   int ret = -1;
   uint32_t attr = ntohl(0x11000000);
   Address turn_addr;
+  Address local_addr;
   StunMessage send_msg;
   StunMessage recv_msg;
   memset(&recv_msg, 0, sizeof(recv_msg));
   memset(&send_msg, 0, sizeof(send_msg));
+
+  // Get the local address of the socket being used for the related address
+  int socket_index = (serv_addr->family == AF_INET6) ? 1 : 0;
+  memcpy(&local_addr, &agent->udp_sockets[socket_index].bind_addr, sizeof(Address));
+
   stun_msg_create(&send_msg, STUN_METHOD_ALLOCATE);
   stun_msg_write_attr(&send_msg, STUN_ATTR_TYPE_REQUESTED_TRANSPORT, sizeof(attr), (char*)&attr);  // UDP
   stun_msg_write_attr(&send_msg, STUN_ATTR_TYPE_USERNAME, strlen(username), (char*)username);
@@ -231,8 +251,13 @@ static int agent_create_turn_addr(Agent* agent, Address* serv_addr, const char* 
 
   stun_parse_msg_buf(&recv_msg);
   memcpy(&turn_addr, &recv_msg.relayed_addr, sizeof(Address));
-  IceCandidate* ice_candidate = agent->local_candidates + agent->local_candidates_count++;
+  IceCandidate* ice_candidate = agent->local_candidates + agent->local_candidates_count;
   ice_candidate_create(ice_candidate, agent->local_candidates_count, ICE_CANDIDATE_TYPE_RELAY, &turn_addr);
+
+  // Set the related address (raddr) to the local socket address that was used for TURN
+  memcpy(&ice_candidate->raddr, &local_addr, sizeof(Address));
+
+  agent->local_candidates_count++;
   return ret;
 }
 
