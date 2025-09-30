@@ -201,21 +201,10 @@ static int agent_create_turn_addr(Agent* agent, Address* serv_addr, const char* 
   int ret = -1;
   uint32_t attr = ntohl(0x11000000);
   Address turn_addr;
-  Address* related_host_addr = NULL;
   StunMessage send_msg;
   StunMessage recv_msg;
   memset(&recv_msg, 0, sizeof(recv_msg));
   memset(&send_msg, 0, sizeof(send_msg));
-
-  // Find the corresponding host candidate that matches the server address family
-  for (int i = 0; i < agent->local_candidates_count; i++) {
-    if (agent->local_candidates[i].type == ICE_CANDIDATE_TYPE_HOST &&
-        agent->local_candidates[i].addr.family == serv_addr->family) {
-      related_host_addr = &agent->local_candidates[i].addr;
-      break;
-    }
-  }
-
   stun_msg_create(&send_msg, STUN_METHOD_ALLOCATE);
   stun_msg_write_attr(&send_msg, STUN_ATTR_TYPE_REQUESTED_TRANSPORT, sizeof(attr), (char*)&attr);  // UDP
   stun_msg_write_attr(&send_msg, STUN_ATTR_TYPE_USERNAME, strlen(username), (char*)username);
@@ -261,18 +250,10 @@ static int agent_create_turn_addr(Agent* agent, Address* serv_addr, const char* 
 
   stun_parse_msg_buf(&recv_msg);
   memcpy(&turn_addr, &recv_msg.relayed_addr, sizeof(Address));
-  IceCandidate* ice_candidate = agent->local_candidates + agent->local_candidates_count;
+  IceCandidate* ice_candidate = agent->local_candidates + agent->local_candidates_count++;
   ice_candidate_create(ice_candidate, agent->local_candidates_count, ICE_CANDIDATE_TYPE_RELAY, &turn_addr);
-
-  // Set the related address (raddr) to the host candidate address
-  if (related_host_addr != NULL) {
-    memcpy(&ice_candidate->raddr, related_host_addr, sizeof(Address));
-  }
-
-  agent->local_candidates_count++;
   return ret;
 }
-
 
 void agent_gather_candidate(Agent* agent, const char* urls, const char* username, const char* credential) {
   char* pos;
